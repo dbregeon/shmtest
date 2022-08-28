@@ -2,12 +2,15 @@ extern crate shmtest;
 
 use shmtest::common::reader::ShmReader;
 use shmtest::common::store_customer::ShmStore;
+use shmtest::common::stream_consumer::ShmStream;
 use shmtest::common::{ShmDefinition, TestRecord};
 use std::io::Read;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn main() {
     test_reader();
     test_store_client();
+    test_stream_consumer();
 }
 
 fn test_reader() {
@@ -36,7 +39,33 @@ fn test_store_client() {
                 println!("Found {:?}", r.value);
                 break;
             }
-            Err(e) => {}
+            Err(_) => {}
         }
     }
+
+    store.close().unwrap();
+}
+
+fn test_stream_consumer() {
+    let definition = ShmDefinition::new("test_stream".to_string(), 1024);
+    let mut stream: ShmStream<u128> = ShmStream::open(definition).unwrap();
+
+    let mut sequence = 0;
+
+    while sequence < 10 {
+        match stream.next() {
+            Some(t) => {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos();
+
+                println!("Lag {}", now - t);
+                sequence += 1;
+            }
+            None => {}
+        }
+    }
+
+    stream.close().unwrap();
 }

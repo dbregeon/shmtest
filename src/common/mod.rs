@@ -4,6 +4,8 @@ pub mod reader;
 mod shm;
 pub mod store_customer;
 pub mod store_owner;
+pub mod stream_consumer;
+pub mod stream_producer;
 pub mod writer;
 
 pub struct ShmDefinition {
