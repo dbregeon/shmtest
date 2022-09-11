@@ -6,8 +6,11 @@ use nix::Result;
 use crate::common::shm::MutableShmMap;
 use crate::common::ShmDefinition;
 
+use super::shm_syncer::ShmSync;
+
 pub struct ShmStream<E: Copy> {
     map: MutableShmMap,
+    syncer: ShmSync<MutableShmMap>,
     sequence_number: *mut u64,
     end_ptr: *mut E,
     available: usize,
@@ -16,18 +19,22 @@ pub struct ShmStream<E: Copy> {
 impl<E: Copy> ShmStream<E> {
     pub fn open(definition: ShmDefinition) -> Result<Self> {
         let size = definition.size;
-        MutableShmMap::create(definition).map(|m| {
-            // We keep the number of written bytes of the beginning
-            let sequence_number = m.start_ptr() as *mut u64;
-            // Ensure Alignment
-            let end_ptr = unsafe { (m.start_ptr() as *mut E).add(1) };
-            unsafe { *sequence_number = 0 };
-            Self {
-                map: m,
-                sequence_number: sequence_number,
-                end_ptr: end_ptr,
-                available: (size - size_of::<u64>()) / size_of::<E>(),
-            }
+        let name = definition.name.clone();
+        ShmSync::<MutableShmMap>::create(name).and_then(|syncer| {
+            MutableShmMap::create(definition).map(|m| {
+                // We keep the number of written bytes of the beginning
+                let sequence_number = m.start_ptr() as *mut u64;
+                // Ensure Alignment
+                let end_ptr = unsafe { (m.start_ptr() as *mut E).add(1) };
+                unsafe { *sequence_number = 0 };
+                Self {
+                    map: m,
+                    syncer: syncer,
+                    sequence_number: sequence_number,
+                    end_ptr: end_ptr,
+                    available: (size - size_of::<u64>()) / size_of::<E>(),
+                }
+            })
         })
     }
 
@@ -40,13 +47,9 @@ impl<E: Copy> ShmStream<E> {
                 self.end_ptr = self.end_ptr.add(1);
             };
             self.available -= 1;
-            Ok(())
+            Ok(()).and_then(|_| self.syncer.notify_all())
         } else {
             Err(Errno::ENOMEM)
         }
-    }
-
-    pub fn close(self) -> Result<()> {
-        self.map.delete()
     }
 }

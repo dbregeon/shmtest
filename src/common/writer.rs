@@ -19,7 +19,7 @@ impl ShmWriter {
         MutableShmMap::create(definition).map(|m| {
             // We keep the number of written bytes of the beginning
             let written_bytes_ptr = m.start_ptr();
-            let end_ptr = m.offset(1);
+            let end_ptr = unsafe { written_bytes_ptr.add(1) };
             unsafe { *written_bytes_ptr = 0 };
             Self {
                 map: m,
@@ -28,10 +28,6 @@ impl ShmWriter {
                 available: size - size_of::<u8>(),
             }
         })
-    }
-
-    pub fn close(self) -> Result<()> {
-        self.map.delete()
     }
 }
 

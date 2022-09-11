@@ -1,6 +1,7 @@
 use std::os::unix::io::RawFd;
 use std::ptr::null_mut;
 
+use log::debug;
 use nix::fcntl::OFlag;
 use nix::sys::mman::{mmap, munmap, shm_open, shm_unlink, MapFlags, ProtFlags};
 use nix::sys::stat::Mode;
@@ -13,12 +14,21 @@ use crate::common::ShmDefinition;
 
 pub struct ShmMap {
     definition: ShmDefinition,
-    map_ptr: *const u8,
+    start_ptr: *const u8,
 }
 
 pub struct MutableShmMap {
     definition: ShmDefinition,
-    map_ptr: *mut u8,
+    start_ptr: *const u8,
+}
+
+impl Drop for MutableShmMap {
+    fn drop(&mut self) {
+        debug!("dropping mutableshm {}", self.definition.name);
+        unsafe { munmap(self.start_ptr as *mut _, self.definition.size) }
+            .and_then(|_| shm_unlink(self.definition.name.as_str()))
+            .unwrap();
+    }
 }
 
 impl MutableShmMap {
@@ -29,28 +39,25 @@ impl MutableShmMap {
             Mode::S_IRUSR | Mode::S_IWUSR,                  //Permission allow user+rw
         )
         .and_then(|fd| {
-            create_mmap(&definition, fd, ProtFlags::PROT_WRITE).and_then(|p| {
+            create_mmap(
+                &definition,
+                fd,
+                ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
+            )
+            .and_then(|p| {
                 close(fd).and_then(|_| {
+                    debug!("created mutableshm {}", definition.name);
                     Ok(Self {
                         definition,
-                        map_ptr: p as *mut u8,
+                        start_ptr: p as *const u8,
                     })
                 })
             })
         })
     }
 
-    pub fn delete(self) -> Result<()> {
-        unsafe { munmap(self.map_ptr as *mut _, self.definition.size) }
-            .and_then(|_| shm_unlink(self.definition.name.as_str()))
-    }
-
     pub fn start_ptr(&self) -> *mut u8 {
-        self.map_ptr as *mut u8
-    }
-
-    pub fn offset(&self, count: usize) -> *mut u8 {
-        unsafe { self.map_ptr.add(count) }
+        self.start_ptr as *mut u8
     }
 }
 
@@ -72,19 +79,32 @@ fn create_mmap(definition: &ShmDefinition, fd: RawFd, flags: ProtFlags) -> Resul
     }
 }
 
+impl Drop for ShmMap {
+    fn drop(&mut self) {
+        debug!("dropping shm {}", self.definition.name);
+        unsafe { munmap(self.start_ptr as *mut _, self.definition.size).unwrap() }
+    }
+}
+
 impl ShmMap {
     pub fn open(definition: ShmDefinition) -> Result<Self> {
         shm_open(
             definition.name.as_str(),
-            OFlag::O_RDWR, // write to allow resize
-            Mode::S_IRUSR, //Permission allow user+rw
+            OFlag::O_RDWR,                 // write to allow resize
+            Mode::S_IRUSR | Mode::S_IWUSR, //Permission allow user+rw
         )
         .and_then(|fd| {
-            create_mmap(&definition, fd, ProtFlags::PROT_READ).and_then(|p| {
+            create_mmap(
+                &definition,
+                fd,
+                ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
+            )
+            .and_then(|p| {
                 close(fd).and_then(|_| {
+                    debug!("opened shm {}", definition.name);
                     Ok(Self {
                         definition,
-                        map_ptr: p as *const u8,
+                        start_ptr: p as *const u8,
                     })
                 })
             })
@@ -92,14 +112,6 @@ impl ShmMap {
     }
 
     pub fn start_ptr(&self) -> *const u8 {
-        self.map_ptr
-    }
-
-    pub fn offset(&self, count: usize) -> *const u8 {
-        unsafe { self.map_ptr.add(count) }
-    }
-
-    pub fn close(self) -> Result<()> {
-        unsafe { munmap(self.map_ptr as *mut _, self.definition.size) }
+        self.start_ptr
     }
 }

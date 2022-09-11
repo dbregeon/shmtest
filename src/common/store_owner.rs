@@ -62,8 +62,4 @@ impl<K: Eq + Hash, R: Record<K>> ShmStore<K, R> {
             Err(Errno::ENOMEM)
         }
     }
-
-    pub fn close(self) -> Result<()> {
-        self.map.delete()
-    }
 }

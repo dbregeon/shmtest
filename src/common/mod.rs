@@ -1,7 +1,9 @@
 use std::hash::Hash;
 
+mod pthread;
 pub mod reader;
-mod shm;
+pub mod shm;
+pub mod shm_syncer;
 pub mod store_customer;
 pub mod store_owner;
 pub mod stream_consumer;

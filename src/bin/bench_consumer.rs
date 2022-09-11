@@ -76,6 +76,4 @@ fn test_light_load(warmup_count: usize, count: usize) {
         );
         previous = Some(r);
     }
-
-    stream.close().unwrap();
 }

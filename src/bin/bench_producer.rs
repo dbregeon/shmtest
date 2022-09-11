@@ -58,8 +58,6 @@ fn run_light_load(warmup_count: usize, count: usize, beat: std::time::Duration) 
         wait(beat);
         stream.insert(build_light_record(i)).unwrap();
     }
-
-    stream.close().unwrap();
 }
 
 // Thread sleep may not accomodate small durations

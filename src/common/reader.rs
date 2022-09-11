@@ -17,7 +17,7 @@ impl ShmReader {
         ShmMap::open(definition).map(|m| {
             // We keep the number of written bytes of the beginning
             let written_bytes_ptr = m.start_ptr();
-            let last_read_ptr = m.offset(1);
+            let last_read_ptr = unsafe { written_bytes_ptr.add(1) };
             Self {
                 map: m,
                 written_bytes_ptr: written_bytes_ptr,
@@ -25,10 +25,6 @@ impl ShmReader {
                 read: 0,
             }
         })
-    }
-
-    pub fn close(self) -> Result<()> {
-        self.map.close()
     }
 }
 

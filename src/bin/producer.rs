@@ -38,8 +38,4 @@ fn main() {
             .as_nanos();
         stream.insert(event).unwrap();
     }
-
-    writer.close().unwrap();
-    store.close().unwrap();
-    stream.close().unwrap();
 }

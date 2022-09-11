@@ -19,7 +19,6 @@ fn test_reader() {
     let mut buffer = vec![0 as u8; 1024];
 
     reader.read(&mut buffer).unwrap();
-    reader.close().unwrap();
 
     println!("{}", std::str::from_utf8(&buffer).unwrap());
 }
@@ -42,8 +41,6 @@ fn test_store_client() {
             Err(_) => {}
         }
     }
-
-    store.close().unwrap();
 }
 
 fn test_stream_consumer() {
@@ -66,6 +63,4 @@ fn test_stream_consumer() {
             None => {}
         }
     }
-
-    stream.close().unwrap();
 }

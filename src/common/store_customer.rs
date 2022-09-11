@@ -50,8 +50,4 @@ impl<K: Eq + Hash + Clone, R: Record<K>> ShmStore<K, R> {
             .ok_or(Errno::ENOKEY)
             .and_then(|i| unsafe { Ok(self.end_ptr.sub(records_count - i).read_volatile()) })
     }
-
-    pub fn close(self) -> Result<()> {
-        self.map.close()
-    }
 }
