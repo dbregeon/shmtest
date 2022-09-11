@@ -47,7 +47,8 @@ impl<E: Copy> ShmStream<E> {
                 self.end_ptr = self.end_ptr.add(1);
             };
             self.available -= 1;
-            Ok(()).and_then(|_| self.syncer.notify_all())
+            self.syncer.notify_all();
+            Ok(())
         } else {
             Err(Errno::ENOMEM)
         }

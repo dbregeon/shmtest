@@ -1,213 +1,87 @@
 use std::{
-    mem::{ManuallyDrop, MaybeUninit},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    mem::MaybeUninit,
+    sync::{Condvar, Mutex, MutexGuard},
+    time::Duration,
 };
 
-use libc::{pthread_cond_t, pthread_mutex_t, timespec};
 use log::debug;
 
 use super::shm::{MutableShmMap, ShmMap};
 
 pub struct ShmMutex<T> {
-    should_destroy: bool,
-    shm: ManuallyDrop<T>,
-    ptr: *mut libc::pthread_mutex_t,
-}
-
-impl<T> Drop for ShmMutex<T> {
-    fn drop(&mut self) {
-        if self.should_destroy {
-            debug!("destroying mutex");
-            unsafe {
-                libc::pthread_mutex_destroy(self.ptr);
-            }
-        }
-        unsafe {
-            ManuallyDrop::drop(&mut self.shm);
-        }
-    }
+    shm: T,
+    ptr: *mut Mutex<u8>,
 }
 
 impl ShmMutex<MutableShmMap> {
-    pub fn init_from_shm(shm: MutableShmMap, attr: MutexAttr) -> nix::Result<Self> {
+    pub fn init_in_shm(shm: MutableShmMap) -> Self {
         unsafe {
-            let ptr = shm.start_ptr() as *mut pthread_mutex_t;
-            let result = libc::pthread_mutex_init(ptr, attr.ptr);
-            if 0 == result {
-                debug!("created mutex at {:?}", shm.start_ptr());
-                Ok(ShmMutex::<MutableShmMap> {
-                    shm: ManuallyDrop::new(shm),
-                    should_destroy: true,
-                    ptr: ptr,
-                })
-            } else {
-                Err(nix::errno::Errno::from_i32(result))
-            }
+            let mutex = Mutex::new(0 as u8);
+            let ptr = shm.start_ptr() as *mut Mutex<u8>;
+            ptr.write(mutex);
+            debug!("created mutex at {:?}", shm.start_ptr());
+            ShmMutex::<MutableShmMap> { shm: shm, ptr: ptr }
         }
     }
 }
 
 impl<T> ShmMutex<T> {
-    pub fn lock(&mut self) -> nix::Result<()> {
+    pub fn lock(&mut self) -> MutexGuard<u8> {
         unsafe {
-            let result = libc::pthread_mutex_lock(self.ptr);
-            if 0 == result {
-                debug!("locked mutex at {:?}", self.ptr);
-                Ok(())
-            } else {
-                Err(nix::errno::Errno::from_i32(result))
-            }
-        }
-    }
-
-    pub fn unlock(&mut self) -> nix::Result<()> {
-        unsafe {
-            let result = libc::pthread_mutex_unlock(self.ptr);
-            if 0 == result {
-                debug!("unlocked mutex at {:?}", self.ptr);
-                Ok(())
-            } else {
-                Err(nix::errno::Errno::from_i32(result))
-            }
+            let guard = (*self.ptr).lock().unwrap();
+            debug!("locked mutex at {:?}", self.ptr);
+            guard
         }
     }
 }
 
 impl ShmMutex<ShmMap> {
     pub fn from_raw_pointer(shm: ShmMap) -> Self {
-        let ptr = shm.start_ptr() as *mut pthread_mutex_t;
+        let ptr = shm.start_ptr() as *mut Mutex<u8>;
         debug!("initialized mutex at {:?}", ptr);
-        ShmMutex {
-            should_destroy: false,
-            shm: ManuallyDrop::new(shm),
-            ptr: ptr,
-        }
-    }
-}
-
-pub struct MutexAttr {
-    ptr: *mut libc::pthread_mutexattr_t,
-}
-
-impl Drop for MutexAttr {
-    fn drop(&mut self) {
-        debug!("destroying nutexattr");
-        unsafe {
-            libc::pthread_mutexattr_destroy(self.ptr);
-        }
-    }
-}
-
-impl MutexAttr {
-    pub fn init() -> nix::Result<Self> {
-        unsafe {
-            let mutex_attr: *mut libc::pthread_mutexattr_t = MaybeUninit::uninit().as_mut_ptr();
-            let result = libc::pthread_mutexattr_init(mutex_attr);
-            if 0 == result {
-                debug!("initialized nutexattr");
-                Ok(MutexAttr { ptr: mutex_attr })
-            } else {
-                Err(nix::errno::Errno::from_i32(result))
-            }
-        }
-    }
-
-    pub fn set_pshared(&self) -> nix::Result<()> {
-        unsafe {
-            let result = libc::pthread_mutexattr_setpshared(self.ptr, libc::PTHREAD_PROCESS_SHARED);
-            if 0 == result {
-                debug!("shared nutexattr");
-                Ok(())
-            } else {
-                Err(nix::errno::Errno::from_i32(result))
-            }
-        }
+        ShmMutex { shm: shm, ptr: ptr }
     }
 }
 
 pub struct ShmCondition<T> {
-    should_destroy: bool,
-    shm: ManuallyDrop<T>,
-    ptr: *mut libc::pthread_cond_t,
-}
-
-impl<T> Drop for ShmCondition<T> {
-    fn drop(&mut self) {
-        if self.should_destroy {
-            debug!("destroying cond");
-            unsafe {
-                libc::pthread_cond_destroy(self.ptr);
-            }
-        }
-        unsafe {
-            ManuallyDrop::drop(&mut self.shm);
-        }
-    }
+    shm: T,
+    ptr: *mut Condvar,
 }
 
 impl ShmCondition<MutableShmMap> {
-    pub fn init_from_shm(shm: MutableShmMap, attr: ConditionAttr) -> nix::Result<Self> {
-        let ptr = shm.start_ptr() as *mut pthread_cond_t;
+    pub fn init_in_shm(shm: MutableShmMap) -> Self {
+        let condvar = Condvar::new();
+        let ptr = shm.start_ptr() as *mut Condvar;
         unsafe {
-            let result = libc::pthread_cond_init(ptr, attr.ptr);
-            if 0 == result {
-                debug!("created cond at {:?}", shm.start_ptr());
-                Ok(ShmCondition {
-                    should_destroy: true,
-                    shm: ManuallyDrop::new(shm),
-                    ptr: ptr,
-                })
-            } else {
-                Err(nix::errno::Errno::from_i32(result))
-            }
+            ptr.write(condvar);
+            debug!("created cond at {:?}", shm.start_ptr());
+            ShmCondition { shm: shm, ptr: ptr }
         }
     }
 
-    pub fn notify_all(&mut self) -> nix::Result<()> {
+    pub fn notify_all(&mut self) {
         unsafe {
-            let result = libc::pthread_cond_broadcast(self.ptr);
-            if 0 == result {
-                debug!("notified cond at {:?}", self.ptr);
-                Ok(())
-            } else {
-                Err(nix::errno::Errno::from_i32(result))
-            }
+            (*self.ptr).notify_all();
+            debug!("notified cond at {:?}", self.ptr);
         }
     }
 }
 
 impl ShmCondition<ShmMap> {
-    pub fn wait<T>(&mut self, mutex: &mut ShmMutex<T>) -> nix::Result<()> {
-        let wait_result = mutex.lock().and_then(|_| unsafe {
-            debug!("waiting on condition at {:?}", self.ptr);
-            let wait_end = timespec {
-                tv_sec: (SystemTime::now() + Duration::from_secs(30))
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as i64,
-                tv_nsec: 0,
-            };
-            let result = libc::pthread_cond_timedwait(self.ptr, mutex.ptr, &wait_end);
-            if 0 == result {
-                debug!("woke on condition at {:?}", self.ptr);
-                Ok(())
-            } else {
-                Err(nix::errno::Errno::from_i32(result))
-            }
-        });
-        let unlock_result = mutex.unlock();
-
-        wait_result.and(unlock_result)
+    pub fn wait<T>(&mut self, mutex: &mut ShmMutex<T>) {
+        let guard = mutex.lock();
+        unsafe {
+            (*self.ptr)
+                .wait_timeout(guard, Duration::from_secs(30))
+                .unwrap();
+            debug!("woke on condition at {:?}", self.ptr);
+        }
     }
 
     pub fn from_raw_pointer(shm: ShmMap) -> Self {
-        let ptr = shm.start_ptr() as *mut libc::pthread_cond_t;
+        let ptr = shm.start_ptr() as *mut Condvar;
         debug!("initialized cond at {:?}", ptr);
-        ShmCondition {
-            should_destroy: false,
-            shm: ManuallyDrop::new(shm),
-            ptr: ptr,
-        }
+        ShmCondition { shm: shm, ptr: ptr }
     }
 }
 
@@ -257,18 +131,15 @@ mod tests {
 
     use crate::common::{shm::MutableShmMap, ShmDefinition};
 
-    use super::{MutexAttr, ShmMutex};
+    use super::ShmMutex;
 
     #[test]
     fn init_mutex_produces_a_valid_mutex_from_shared_memory() {
         let definition =
             ShmDefinition::new("sync".to_string(), std::mem::size_of::<pthread_mutex_t>());
         let shm = MutableShmMap::create(definition).unwrap();
-        let attr = MutexAttr::init().unwrap();
-        attr.set_pshared().unwrap();
-        let mut mutex = ShmMutex::init_from_shm(shm, attr).unwrap();
+        let mut mutex = ShmMutex::init_in_shm(shm);
 
-        mutex.lock().unwrap();
-        mutex.unlock().unwrap();
+        mutex.lock();
     }
 }

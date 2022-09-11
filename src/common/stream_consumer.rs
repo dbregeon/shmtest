@@ -36,23 +36,18 @@ impl<E: Copy> ShmStream<E> {
     pub fn next(&mut self) -> Option<E> {
         let current_sequence = unsafe { self.sequence_number.read_volatile() };
         if current_sequence < self.next_sequence {
-            self.syncer.wait()
-        } else {
-            Ok(())
+            self.syncer.wait();
         }
-        .ok()
-        .and_then(|_| {
-            if current_sequence >= self.next_sequence {
-                let record = unsafe { self.end_ptr.read_volatile() };
-                self.next_sequence += 1;
+        if current_sequence >= self.next_sequence {
+            let record = unsafe { self.end_ptr.read_volatile() };
+            self.next_sequence += 1;
 
-                unsafe {
-                    self.end_ptr = self.end_ptr.add(1);
-                }
-                Some(record)
-            } else {
-                None
+            unsafe {
+                self.end_ptr = self.end_ptr.add(1);
             }
-        })
+            Some(record)
+        } else {
+            None
+        }
     }
 }

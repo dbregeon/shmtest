@@ -7,6 +7,6 @@ fn main() {
     let mut syncer = ShmSync::<ShmMap>::load("test".to_string()).unwrap();
 
     info!("start wait");
-    syncer.wait().unwrap();
+    syncer.wait();
     info!("end wait");
 }

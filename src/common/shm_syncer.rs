@@ -21,18 +21,14 @@ impl ShmSync<MutableShmMap> {
         );
         let mutex_shm = MutableShmMap::create(mutex_definition).unwrap();
         let condvar_shm = MutableShmMap::create(condvar_definition).unwrap();
-        let mutex_attr = pthread::MutexAttr::init().unwrap();
-        mutex_attr.set_pshared().unwrap();
-        let mutex = pthread::ShmMutex::init_from_shm(mutex_shm, mutex_attr).unwrap();
-        let cond_attr = pthread::ConditionAttr::init().unwrap();
-        cond_attr.set_pshared().unwrap();
-        let condition = pthread::ShmCondition::init_from_shm(condvar_shm, cond_attr).unwrap();
+        let mutex = pthread::ShmMutex::init_in_shm(mutex_shm);
+        let condition = pthread::ShmCondition::init_in_shm(condvar_shm);
 
         Ok(ShmSync { mutex, condition })
     }
 
-    pub fn notify_all(&mut self) -> nix::Result<()> {
-        self.condition.notify_all()
+    pub fn notify_all(&mut self) {
+        self.condition.notify_all();
     }
 }
 
@@ -54,7 +50,7 @@ impl ShmSync<ShmMap> {
         Ok(ShmSync { mutex, condition })
     }
 
-    pub fn wait(&mut self) -> nix::Result<()> {
-        self.condition.wait(&mut self.mutex)
+    pub fn wait(&mut self) {
+        self.condition.wait(&mut self.mutex);
     }
 }
