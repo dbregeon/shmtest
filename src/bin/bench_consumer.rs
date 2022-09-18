@@ -23,6 +23,8 @@ struct Args {
 }
 
 fn main() {
+    env_logger::init();
+
     let args = Args::parse();
 
     test_light_load(args.warmup_count, args.count);
