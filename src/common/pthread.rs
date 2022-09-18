@@ -1,15 +1,11 @@
-use std::{
-    mem::MaybeUninit,
-    sync::{Condvar, Mutex, MutexGuard},
-    time::Duration,
-};
+use std::sync::{Condvar, Mutex, MutexGuard};
 
 use log::debug;
 
 use super::shm::{MutableShmMap, ShmMap};
 
 pub struct ShmMutex<T> {
-    shm: T,
+    _shm: T,
     ptr: *mut Mutex<u8>,
 }
 
@@ -20,7 +16,10 @@ impl ShmMutex<MutableShmMap> {
             let ptr = shm.start_ptr() as *mut Mutex<u8>;
             ptr.write(mutex);
             debug!("created mutex at {:?}", shm.start_ptr());
-            ShmMutex::<MutableShmMap> { shm: shm, ptr: ptr }
+            ShmMutex::<MutableShmMap> {
+                _shm: shm,
+                ptr: ptr,
+            }
         }
     }
 }
@@ -39,12 +38,15 @@ impl ShmMutex<ShmMap> {
     pub fn from_raw_pointer(shm: ShmMap) -> Self {
         let ptr = shm.start_ptr() as *mut Mutex<u8>;
         debug!("initialized mutex at {:?}", ptr);
-        ShmMutex { shm: shm, ptr: ptr }
+        ShmMutex {
+            _shm: shm,
+            ptr: ptr,
+        }
     }
 }
 
 pub struct ShmCondition<T> {
-    shm: T,
+    _shm: T,
     ptr: *mut Condvar,
 }
 
@@ -55,7 +57,10 @@ impl ShmCondition<MutableShmMap> {
         unsafe {
             ptr.write(condvar);
             debug!("created cond at {:?}", shm.start_ptr());
-            ShmCondition { shm: shm, ptr: ptr }
+            ShmCondition {
+                _shm: shm,
+                ptr: ptr,
+            }
         }
     }
 
@@ -78,7 +83,10 @@ impl ShmCondition<ShmMap> {
     pub fn from_raw_pointer(shm: ShmMap) -> Self {
         let ptr = shm.start_ptr() as *mut Condvar;
         debug!("initialized cond at {:?}", ptr);
-        ShmCondition { shm: shm, ptr: ptr }
+        ShmCondition {
+            _shm: shm,
+            ptr: ptr,
+        }
     }
 }
 
