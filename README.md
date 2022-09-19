@@ -18,7 +18,7 @@ cargo build --release
 
 Example result (in nanos):
 
-| seq | t2 -t1 }| t2 | t1 | t2 - previous t2 | t1 - previous t1 |
+| seq | t2 -t1 | t2 | t1 | t2 - previous t2 | t1 - previous t1 |
 
 ```
 99989 3600 1663593793673980876 1663593793673977276 12164 12056
