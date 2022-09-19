@@ -1,6 +1,6 @@
 use std::sync::{atomic::Ordering, Condvar, Mutex, MutexGuard};
 
-use linux_futex::{Futex, Shared};
+use linux_futex::{Futex, Shared, WaitError};
 use log::debug;
 
 use super::shm::{MutableShmMap, ShmMap};
@@ -65,7 +65,7 @@ impl ShmCondition<MutableShmMap> {
 
     pub fn notify_all(&mut self) {
         unsafe {
-            (*self.ptr).value.fetch_add(1, Ordering::Relaxed);
+            (*self.ptr).value.fetch_add(1, Ordering::Release);
             (*self.ptr).wake(libc::INT_MAX);
             debug!("notified cond at {:?}", *self.ptr);
         }
@@ -78,10 +78,19 @@ impl<T> ShmCondition<T> {
             debug!("Waiting on condition at {:?}", *self.ptr);
             let expected_value = {
                 let _guard = mutex.lock();
-                (*self.ptr).value.load(Ordering::Relaxed)
+                (*self.ptr).value.load(Ordering::Acquire)
             };
-            let result = (*self.ptr).wait(expected_value).unwrap();
-            debug!("woke on condition at {:?} {:?}", *self.ptr, result);
+            loop {
+                let result = (*self.ptr).wait(expected_value);
+                match result {
+                    Err(WaitError::Interrupted) => continue,
+                    Err(WaitError::WrongValue) => return,
+                    _ => {
+                        debug!("woke on condition at {:?} {:?}", *self.ptr, result);
+                        return;
+                    }
+                }
+            }
         }
     }
 }

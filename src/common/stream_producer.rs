@@ -46,8 +46,8 @@ impl<E: Copy> ShmStream<E> {
                 self.sequence_number.write_volatile(sequence_number + 1);
                 self.end_ptr = self.end_ptr.add(1);
             };
-            self.available -= 1;
             self.syncer.notify_all();
+            self.available -= 1;
             Ok(())
         } else {
             Err(Errno::ENOMEM)

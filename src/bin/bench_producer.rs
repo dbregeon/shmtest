@@ -1,11 +1,12 @@
 extern crate shmtest;
 
+use core::ops::Add;
 use shmtest::bench_records::LigthRecord;
 use shmtest::common::stream_producer::ShmStream;
 use shmtest::common::ShmDefinition;
 use std::{
     mem::size_of,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use clap::{self, Parser};
@@ -64,8 +65,8 @@ fn run_light_load(warmup_count: usize, count: usize, beat: std::time::Duration) 
 
 // Thread sleep may not accomodate small durations
 fn wait(duration: std::time::Duration) {
-    let start = SystemTime::now();
-    while start.elapsed().unwrap() < duration {
+    let end = Instant::now().add(duration);
+    while Instant::now() < end {
         // burn
     }
 }
