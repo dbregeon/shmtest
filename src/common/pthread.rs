@@ -1,5 +1,6 @@
-use std::sync::{Condvar, Mutex, MutexGuard};
+use std::sync::{atomic::Ordering, Condvar, Mutex, MutexGuard};
 
+use linux_futex::{Futex, Shared};
 use log::debug;
 
 use super::shm::{MutableShmMap, ShmMap};
@@ -12,10 +13,8 @@ pub struct ShmMutex<T> {
 impl ShmMutex<MutableShmMap> {
     pub fn init_in_shm(shm: MutableShmMap) -> Self {
         unsafe {
-            let mutex = Mutex::new(0 as u8);
             let ptr = shm.start_ptr() as *mut Mutex<u8>;
-            ptr.write(mutex);
-            debug!("created mutex at {:?}", shm.start_ptr());
+            debug!("created mutex at {:?}", *shm.start_ptr());
             ShmMutex::<MutableShmMap> {
                 _shm: shm,
                 ptr: ptr,
@@ -27,8 +26,9 @@ impl ShmMutex<MutableShmMap> {
 impl<T> ShmMutex<T> {
     pub fn lock(&mut self) -> MutexGuard<u8> {
         unsafe {
+            debug!("locking mutex at {:?}", *self.ptr);
             let guard = (*self.ptr).lock().unwrap();
-            debug!("locked mutex at {:?}", self.ptr);
+            debug!("locked mutex at {:?}", *self.ptr);
             guard
         }
     }
@@ -37,7 +37,7 @@ impl<T> ShmMutex<T> {
 impl ShmMutex<ShmMap> {
     pub fn from_raw_pointer(shm: ShmMap) -> Self {
         let ptr = shm.start_ptr() as *mut Mutex<u8>;
-        debug!("initialized mutex at {:?}", ptr);
+        unsafe { debug!("initialized mutex at {:?}", *ptr) };
         ShmMutex {
             _shm: shm,
             ptr: ptr,
@@ -47,16 +47,15 @@ impl ShmMutex<ShmMap> {
 
 pub struct ShmCondition<T> {
     _shm: T,
-    ptr: *mut Condvar,
+    ptr: *mut Futex<Shared>,
 }
 
 impl ShmCondition<MutableShmMap> {
     pub fn init_in_shm(shm: MutableShmMap) -> Self {
-        let condvar = Condvar::new();
-        let ptr = shm.start_ptr() as *mut Condvar;
+        let ptr = shm.start_ptr() as *mut Futex<Shared>;
         unsafe {
-            ptr.write(condvar);
-            debug!("created cond at {:?}", shm.start_ptr());
+            (*ptr).value.store(1, Ordering::Relaxed);
+            debug!("created cond at {:?}", *ptr);
             ShmCondition {
                 _shm: shm,
                 ptr: ptr,
@@ -66,23 +65,31 @@ impl ShmCondition<MutableShmMap> {
 
     pub fn notify_all(&mut self) {
         unsafe {
-            (*self.ptr).notify_all();
-            debug!("notified cond at {:?}", self.ptr);
+            (*self.ptr).value.fetch_add(1, Ordering::Relaxed);
+            (*self.ptr).wake(libc::INT_MAX);
+            debug!("notified cond at {:?}", *self.ptr);
+        }
+    }
+}
+
+impl<T> ShmCondition<T> {
+    pub fn wait(&mut self, mutex: &mut Mutex<u8>) {
+        unsafe {
+            debug!("Waiting on condition at {:?}", *self.ptr);
+            let expected_value = {
+                let _guard = mutex.lock();
+                (*self.ptr).value.load(Ordering::Relaxed)
+            };
+            let result = (*self.ptr).wait(expected_value).unwrap();
+            debug!("woke on condition at {:?} {:?}", *self.ptr, result);
         }
     }
 }
 
 impl ShmCondition<ShmMap> {
-    pub fn wait<T>(&mut self, mutex: &mut ShmMutex<T>) {
-        unsafe {
-            let result = (*self.ptr).wait(mutex.lock()).unwrap();
-            debug!("woke on condition at {:?} {:?}", self.ptr, result);
-        }
-    }
-
     pub fn from_raw_pointer(shm: ShmMap) -> Self {
-        let ptr = shm.start_ptr() as *mut Condvar;
-        debug!("initialized cond at {:?}", ptr);
+        let ptr = shm.start_ptr() as *mut Futex<Shared>;
+        unsafe { debug!("initialized cond at {:?}", *ptr) };
         ShmCondition {
             _shm: shm,
             ptr: ptr,
@@ -103,35 +110,22 @@ mod tests {
         ShmDefinition,
     };
 
-    use super::ShmMutex;
-
-    #[test]
+    #[test_log::test]
     fn init_mutex_produces_a_valid_mutex_from_shared_memory() {
         let owner = std::thread::spawn(|| {
-            let mutex_definition =
-                ShmDefinition::new("mutex".to_string(), std::mem::size_of::<Mutex<u8>>());
-            let mutex_shm = MutableShmMap::create(mutex_definition).unwrap();
-            let mut mutex = ShmMutex::init_in_shm(mutex_shm);
             let condition_definition =
                 ShmDefinition::new("condition".to_string(), std::mem::size_of::<Condvar>());
-            let condition_shm = MutableShmMap::create(condition_definition).unwrap();
-            let mut condition = ShmCondition::init_in_shm(condition_shm);
+            let condition_shm1 = MutableShmMap::create(condition_definition).unwrap();
+            let mut condition1 = ShmCondition::init_in_shm(condition_shm1);
 
-            for _i in 0..10 {
-                std::thread::sleep(Duration::from_secs(2));
-                let mut guard = mutex.lock();
-                *guard += 1;
-
-                condition.notify_all();
+            for _i in 0..5 {
+                std::thread::sleep(Duration::from_secs(1));
+                condition1.notify_all();
             }
         });
         let client = std::thread::spawn(|| {
             std::thread::sleep(Duration::from_secs(2));
-
-            let mutex_definition =
-                ShmDefinition::new("mutex".to_string(), std::mem::size_of::<Mutex<u8>>());
-            let mutex_shm = ShmMap::open(mutex_definition).unwrap();
-            let mut mutex = ShmMutex::from_raw_pointer(mutex_shm);
+            let mut mutex = Mutex::new(0);
             let condvar_definition =
                 ShmDefinition::new("condition".to_string(), std::mem::size_of::<Condvar>());
             let condvar_shm = ShmMap::open(condvar_definition).unwrap();
